@@ -34,7 +34,7 @@ User browser
    │  ③ Configure: image tag / platforms / registry / visibility / env vars
    ▼
 Cloudflare Worker (this repo)
-   │  ④ Verify the user has forked the build-host (default smanx/docker-builder) with Actions enabled
+   │  ④ Auto-prepare the build host: detect fork → auto-fork → sync to latest → enable Actions
    │  ⑤ Encrypt Docker Hub / private-repo read credentials into the fork's Actions secrets
    │  ⑥ Trigger the build via workflow_dispatch on your fork
    ▼
@@ -69,15 +69,17 @@ npx wrangler secret put GH_OAUTH_CLIENT_ID
 npx wrangler secret put GH_OAUTH_CLIENT_SECRET
 ```
 
-### 3. Prepare the build-host repo (important)
+### 3. Prepare the build-host repo
 
-Before building, every user must:
+Step 2 prepares the build host fully automatically — no manual work needed:
 
-1. **Fork** `smanx/docker-builder` into their own account (the Worker validates the fork status and guides you);
-2. **Enable GitHub Actions** on the fork (disabled by default on forks).
+1. **Auto-detect** whether `smanx/docker-builder` has been forked;
+2. **Auto-fork** if not forked yet;
+3. **Auto-sync to upstream** after forking (so the workflow file is always the latest);
+4. **Auto-enable** GitHub Actions on the fork.
 
 > The build-host source repo can be overridden via `[vars] BUILDER_SOURCE = "owner/repo"` (see `wrangler.toml`).
-> After changing the source repo, re-fork and re-run `wrangler deploy`.
+> After changing the source repo, re-run `wrangler deploy`; if an old fork already exists, step 2 will sync it to the latest automatically.
 
 ### Local development
 
@@ -92,7 +94,7 @@ Put local secrets in `.dev.vars` (see `.dev.vars.example`, ignored by `.gitignor
 | Step | What happens |
 | --- | --- |
 | Step 1 · Detect | Enter `https://github.com/owner/repo` or `owner/repo`; public repos are detected anonymously, private repos need a "detect token"; default branch / branches / tags are listed, and a Dockerfile check is run on the selected version |
-| Step 2 · Configure | GitHub login or manual token (needs `repo + workflow` scopes) → check fork status → set image tag, platforms, registry, visibility, env vars |
+| Step 2 · Configure | GitHub login or manual token (needs `repo + workflow` scopes) → **auto-prepare the fork** (auto-fork if missing, auto-sync to latest, auto-enable Actions) → set image tag, platforms, registry, visibility, env vars |
 | Step 3 · Progress | Polls the GitHub Actions run status in real time ("trigger → build → push"), then prints the image address and `docker pull` command |
 
 ## API Endpoints
@@ -103,7 +105,8 @@ Put local secrets in `.dev.vars` (see `.dev.vars.example`, ignored by `.gitignor
 | `/api/whoami` | GET | Current logged-in user (requires Bearer token) |
 | `/api/auth/login` | GET | Redirect to GitHub OAuth |
 | `/api/auth/callback` | GET | OAuth callback; exchanges code for an access token |
-| `/api/fork-status` | GET | Whether the user has forked the build-host and enabled Actions |
+| `/api/fork-status` | GET | Read-only quick check: whether the build-host is forked and Actions is enabled |
+| `/api/fork-setup` | POST | Auto-prepare the build host: detect → auto-fork if missing → sync to latest → auto-enable Actions (idempotent) |
 | `/api/build` | POST | Validate fork → write secrets → dispatch workflow_dispatch |
 | `/api/status` | GET | Query build status for a run_id (queued / in_progress / completed) |
 

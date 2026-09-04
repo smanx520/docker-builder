@@ -55,6 +55,14 @@
       forkNoActions: '⚠️ 已 fork <b>{source}</b>，但 fork 未开启 GitHub Actions，请先启用后返回重新检查',
       forkOk: '✅ 已 fork <b>{source}</b> 且 Actions 已开启，可直接打包',
       forkCheckFailed: '❌ 检查失败：{msg}',
+      forkSetupRunning: '正在自动检测并准备 fork（未 fork 将自动创建并同步到最新）…',
+      forkChecked: '已检测到已 fork',
+      forkCreated: '已自动创建 fork',
+      forkUpToDate: '已是最新版本',
+      forkUpdated: '已同步到最新版本',
+      forkSyncConflict: '⚠️ fork 与上游存在冲突，未能自动同步，请手动处理',
+      forkActionsEnabled: 'GitHub Actions 已开启',
+      forkActionsManual: '⚠️ 需要手动开启 GitHub Actions',
       imageTagLabel: '镜像 Tag',
       platformsLabel: '构建架构',
       envVarsLabel: '内置环境变量（每行 KEY=VALUE）',
@@ -143,6 +151,14 @@
       forkNoActions: '⚠️ <b>{source}</b> is forked, but GitHub Actions is not enabled on your fork. Enable it and check again',
       forkOk: '✅ <b>{source}</b> is forked and Actions is enabled, ready to build',
       forkCheckFailed: '❌ Check failed: {msg}',
+      forkSetupRunning: 'Checking fork and preparing automatically (forks and syncs if needed)…',
+      forkChecked: 'Fork detected',
+      forkCreated: 'Fork created automatically',
+      forkUpToDate: 'Up to date',
+      forkUpdated: 'Synced to latest',
+      forkSyncConflict: '⚠️ Conflict with upstream, auto-sync failed — resolve manually',
+      forkActionsEnabled: 'GitHub Actions enabled',
+      forkActionsManual: '⚠️ GitHub Actions must be enabled manually',
       imageTagLabel: 'Image Tag',
       platformsLabel: 'Platforms',
       envVarsLabel: 'Built-in env vars (one KEY=VALUE per line)',
@@ -259,8 +275,8 @@
     if (t) {
       localStorage.setItem('db_gh_token', t);
       fetchUser().catch(() => {});
-      // 已停在打包配置步骤时，登录后自动检查 fork 状态
-      if (currentStep === 2) checkFork();
+      // 已停在打包配置步骤时，登录后自动准备 fork
+      if (currentStep === 2) setupFork();
     } else {
       localStorage.removeItem('db_gh_token');
       localStorage.removeItem(SESSION_KEY);
@@ -334,14 +350,21 @@
     $('inp-manual-token').value = '';
   });
 
-  els.btnForkCheck.addEventListener('click', checkFork);
+  els.btnForkCheck.addEventListener('click', setupFork);
 
-  // ---------- 构建宿主 fork 检查 ----------
+  // ---------- 构建宿主 fork 自动准备：检测 → 自动 fork → 同步最新 → 开启 Actions ----------
   function setForkStatus(msg, cls) {
     els.forkStatus.className = 'fork-status' + (cls ? ' ' + cls : '');
     els.forkStatus.innerHTML = msg;
   }
-  // 打包配置只在 fork 检测通过后可见；否则隐藏操作相关内容
+  // 渲染 fork 准备步骤列表（done / active / fail）
+  function setForkSteps(steps, cls) {
+    els.forkStatus.className = 'fork-status' + (cls ? ' ' + cls : '');
+    els.forkStatus.innerHTML = steps.map((s) =>
+      `<div class="fstep ${s.state}"><span class="dot"></span><span>${t(s.key)}</span></div>`
+    ).join('');
+  }
+  // 打包配置只在 fork 就绪后可见；否则隐藏操作相关内容
   function setConfigVisible(visible) {
     els.configFields.hidden = !visible;
     els.btnBuild.hidden = !visible;
@@ -352,28 +375,31 @@
     setConfigVisible(false);
     setForkStatus(t('forkIdle'), '');
   }
-  async function checkFork() {
+  async function setupFork() {
     if (!state.token) return resetFork();
     els.btnForkCheck.disabled = true;
-    els.btnForkCheck.classList.add('is-loading'); // fork 状态检测中：按钮显示 loading
-    setForkStatus(t('forkChecking'), '');
+    els.btnForkCheck.classList.add('is-loading'); // 自动准备中：按钮显示 loading
+    setForkStatus(t('forkSetupRunning'), '');
+    els.forkLink.hidden = true;
+    setConfigVisible(false);
     try {
-      const s = await api('/api/fork-status');
-      if (!s.forked) {
-        els.forkLink.href = s.forkUrl;
-        els.forkLink.hidden = false;
+      const s = await api('/api/fork-setup', { method: 'POST' });
+      if (!s || s.ok === false || s.error) throw new Error(s && s.error ? s.error : t('forkCheckFailed', { msg: '' }));
+      if (!s.canBuild) {
+        // 同步冲突：无自动解法，仅展示步骤；Actions 未开启：给出手动开启链接
+        if (s.conflict) {
+          els.forkLink.hidden = true;
+        } else {
+          els.forkLink.href = s.actionsUrl;
+          els.forkLink.hidden = false;
+        }
         setConfigVisible(false);
-        setForkStatus(t('forkNotForked', { source: s.source }), 'err');
-      } else if (!s.actionsEnabled) {
-        els.forkLink.href = s.actionsUrl;
-        els.forkLink.hidden = false;
-        setConfigVisible(false);
-        setForkStatus(t('forkNoActions', { source: s.source }), 'err');
-      } else {
-        els.forkLink.hidden = true;
-        setConfigVisible(true);
-        setForkStatus(t('forkOk', { source: s.source }), 'ok');
+        setForkSteps(s.steps, 'err');
+        return;
       }
+      els.forkLink.hidden = true;
+      setConfigVisible(true);
+      setForkSteps(s.steps, 'ok');
     } catch (e) {
       els.forkLink.hidden = true;
       setConfigVisible(false);
@@ -534,7 +560,7 @@
     const v = els.selRef.value;
     if (v) els.inpTag.value = v;
     goToStep(2);
-    if (state.token) checkFork();
+    if (state.token) setupFork();
   });
   // 打包配置「上一步」返回第 1 步（仓库检测与版本）
   els.btnBackConfig.addEventListener('click', () => {
@@ -550,7 +576,7 @@
     state.build = null; // 清除以停止 poll 轮询
     persistState();
     goToStep(2);
-    if (state.token) checkFork();
+    if (state.token) setupFork();
     else resetFork();
   });
 
@@ -564,7 +590,7 @@
     // 重新渲染动态区域（保持当前步骤）
     if (els.inpRepo.value.trim()) detect(true);
     if (currentStep === 2) {
-      if (state.token) checkFork();
+      if (state.token) setupFork();
       else resetFork();
     }
   }

@@ -34,7 +34,7 @@ Docker Builder 是一个基于 **Cloudflare Workers + GitHub Actions** 的镜像
    │  ③ 配置：镜像 Tag / 架构 / 推送平台 / 可见性 / 环境变量
    ▼
 Cloudflare Worker（本仓库）
-   │  ④ 校验用户已 fork 宿主项目（默认 smanx/docker-builder）且 Actions 已开启
+   │  ④ 自动准备构建宿主：检测 fork → 未 fork 自动创建 → 同步到上游最新 → 开启 Actions
    │  ⑤ 把 Docker Hub / 私有仓库读取凭据加密写入 fork 的 Actions secrets
    │  ⑥ workflow_dispatch 触发你的 fork 的构建
    ▼
@@ -69,15 +69,17 @@ npx wrangler secret put GH_OAUTH_CLIENT_ID
 npx wrangler secret put GH_OAUTH_CLIENT_SECRET
 ```
 
-### 3. 准备构建宿主仓库（关键）
+### 3. 准备构建宿主仓库
 
-用户打包前必须：
+第 2 步会自动完成构建宿主的全部准备，无需手动操作：
 
-1. **Fork** `smanx/docker-builder` 到自己名下（Worker 会校验 fork 状态并引导）；
-2. 在自己的 fork 上**开启 GitHub Actions**（fork 默认关闭）。
+1. **自动检测**是否已 fork `smanx/docker-builder`；
+2. 未 fork 时**自动创建 fork**；
+3. fork 后**自动同步到上游最新**（确保 workflow 文件是最新版）；
+4. **自动开启** fork 的 GitHub Actions。
 
 > 构建宿主的源仓库可用环境变量覆盖：`[vars] BUILDER_SOURCE = "owner/repo"`（见 `wrangler.toml`）。
-> 修改源仓库后需重新 fork、并重新 `wrangler deploy`。
+> 修改源仓库后需重新 `wrangler deploy`；已有旧 fork 时，第 2 步会自动把它同步到最新。
 
 ### 本地开发
 
@@ -92,7 +94,7 @@ npm run dev
 | 步骤 | 内容 |
 | --- | --- |
 | 第 1 步 仓库检测 | 输入 `https://github.com/owner/repo` 或 `owner/repo`；公共仓库匿名检测，私有仓库填「检测 Token」；列出默认分支 / 分支 / Tag，并校验所选版本根目录是否存在 Dockerfile |
-| 第 2 步 打包配置 | GitHub 登录 或 手动 Token（需要 `repo + workflow` 权限）→ 检查 fork 状态 → 填写镜像 Tag、架构、推送平台、可见性、环境变量 |
+| 第 2 步 打包配置 | GitHub 登录 或 手动 Token（需要 `repo + workflow` 权限）→ **自动准备 fork**（未 fork 自动创建、自动同步到最新、自动开启 Actions）→ 填写镜像 Tag、架构、推送平台、可见性、环境变量 |
 | 第 3 步 构建进度 | 轮询 GitHub Actions 运行状态，实时展示「触发 → 构建 → 推送」，成功后给出镜像地址与 `docker pull` 命令 |
 
 ## API 端点
@@ -103,7 +105,8 @@ npm run dev
 | `/api/whoami` | GET | 当前登录用户（需 Bearer Token） |
 | `/api/auth/login` | GET | 跳转 GitHub OAuth 授权 |
 | `/api/auth/callback` | GET | OAuth 回调，换取 access_token 并回跳前端 |
-| `/api/fork-status` | GET | 检查登录用户是否已 fork 宿主项目、Actions 是否开启 |
+| `/api/fork-status` | GET | 只读快速检测：是否已 fork 宿主项目、Actions 是否开启 |
+| `/api/fork-setup` | POST | 自动准备构建宿主：检测 → 未 fork 自动创建 → 同步到上游最新 → 自动开启 Actions（幂等） |
 | `/api/build` | POST | 校验 fork → 写入 secrets → 触发 workflow_dispatch |
 | `/api/status` | GET | 查询指定 run_id 的构建状态（queued / in_progress / completed） |
 

@@ -38,9 +38,33 @@ export async function getRepo(token, owner, repo) {
   return gh(token, `/repos/${owner}/${repo}`);
 }
 
-// 仓库是否开启 GitHub Actions（fork 默认关闭，需要用户在 fork 上手动开启）
+// 仓库是否开启 GitHub Actions（fork 默认关闭，需要用户开启）
 export async function getActionsPermissions(token, owner, repo) {
   return gh(token, `/repos/${owner}/${repo}/actions/permissions`);
+}
+
+// 开启 / 关闭仓库 GitHub Actions
+export async function setActionsEnabled(token, owner, repo, enabled) {
+  return gh(token, `/repos/${owner}/${repo}/actions/permissions`, {
+    method: 'PUT',
+    body: { enabled: !!enabled }
+  });
+}
+
+// 在认证用户账号下创建 fork（返回 202，fork 可能需要片刻才完全就绪）
+export async function createFork(token, owner, repo) {
+  return gh(token, `/repos/${owner}/${repo}/forks`, {
+    method: 'POST',
+    body: {}
+  });
+}
+
+// 同步 fork 分支到上游最新（等价于 GitHub 网页的「Sync fork」，仅支持 fast-forward）
+export async function mergeUpstream(token, owner, repo, branch) {
+  return gh(token, `/repos/${owner}/${repo}/merge-upstream`, {
+    method: 'POST',
+    body: { branch }
+  });
 }
 
 // GitHub Actions secret 相关
