@@ -1,0 +1,207 @@
+# 构建宿主 workflow：由 Worker 通过 workflow_dispatch 触发。
+# 目标仓库只是「被克隆并构建」的对象，无需对其有任何写权限：
+#   - 公共仓库：匿名克隆
+#   - 私有仓库：使用 secrets.GH_PAT（Worker 构建前写入）克隆
+# 推送平台（inputs.registries，逗号分隔：ghcr,dockerhub）：
+#   - ghcr：使用 GITHUB_TOKEN 推送到 ghcr.io/{GITHUB_REPOSITORY_OWNER}
+#   - dockerhub：凭据来自宿主仓库 secrets：DOCKERHUB_USERNAME / DOCKERHUB_TOKEN（仅勾选时才写入）
+name: docker-build-web
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: '目标仓库地址，如 https://github.com/owner/repo 或 owner/repo'
+        required: true
+      ref:
+        description: '构建的引用：分支名或 Tag；留空使用默认分支最新代码'
+        required: false
+        default: ''
+      tag:
+        description: '镜像 Tag'
+        required: true
+        default: 'latest'
+      platforms:
+        description: '构建架构，逗号分隔，如 linux/amd64,linux/arm64'
+        required: true
+        default: 'linux/amd64'
+      registries:
+        description: '推送平台，逗号分隔：ghcr,dockerhub'
+        required: false
+        default: 'ghcr'
+      env_vars:
+        description: '内置环境变量（KEY=VALUE 每行一个，base64 编码）'
+        required: false
+        default: ''
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Resolve target repository
+        id: target
+        shell: bash
+        run: |
+          URL="${{ inputs.repo_url }}"
+          URL="${URL#https://github.com/}"
+          URL="${URL#http://github.com/}"
+          URL="${URL#git@github.com:}"
+          URL="${URL%.git}"
+          URL="${URL%/}"
+          OWNER="${URL%%/*}"
+          REPO="${URL#*/}"
+          if [ -z "$OWNER" ] || [ -z "$REPO" ] || [ "$OWNER" = "$URL" ]; then
+            echo "无法解析仓库地址: ${{ inputs.repo_url }}" >&2
+            exit 1
+          fi
+          echo "owner=${OWNER}" >> "$GITHUB_OUTPUT"
+          echo "repo=${REPO}" >> "$GITHUB_OUTPUT"
+          echo "Target: ${OWNER}/${REPO}"
+
+      - name: Clone target repository
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        shell: bash
+        run: |
+          OWNER="${{ steps.target.outputs.owner }}"
+          REPO="${{ steps.target.outputs.repo }}"
+          AUTH=""
+          if [ -n "$GH_PAT" ]; then AUTH="x-access-token:${GH_PAT}@"; fi
+          if [ -n "${{ inputs.ref }}" ]; then
+            git clone --depth 1 --branch "${{ inputs.ref }}" "https://${AUTH}github.com/${OWNER}/${REPO}.git" .
+          else
+            git clone --depth 1 "https://${AUTH}github.com/${OWNER}/${REPO}.git" .
+          fi
+
+      - name: Detect Dockerfile
+        id: df
+        shell: bash
+        run: |
+          FILE=""
+          if [ -f Dockerfile ]; then
+            FILE="Dockerfile"
+          elif compgen -G "Dockerfile.*" >/dev/null; then
+            FILE="$(ls Dockerfile.* 2>/dev/null | head -n1)"
+          elif [ -f docker/Dockerfile ]; then
+            FILE="docker/Dockerfile"
+          elif compgen -G "docker/Dockerfile.*" >/dev/null; then
+            FILE="$(ls docker/Dockerfile.* 2>/dev/null | head -n1)"
+          fi
+          echo "file=${FILE}" >> "$GITHUB_OUTPUT"
+          echo "Dockerfile: ${FILE}"
+
+      - name: Fail if no Dockerfile
+        if: steps.df.outputs.file == ''
+        shell: bash
+        run: |
+          echo "未在仓库根目录或 docker/ 目录找到 Dockerfile（可包含 Dockerfile.* 后缀变体）"
+          exit 1
+
+      - name: Set up QEMU
+        if: contains(inputs.platforms, 'linux/arm') || contains(inputs.platforms, 'linux/386')
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        if: contains(inputs.registries, 'ghcr')
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub
+        if: contains(inputs.registries, 'dockerhub')
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build image tags
+        id: tags
+        shell: bash
+        run: |
+          TAGS=""
+          if [[ "${{ inputs.registries }}" == *"ghcr"* ]]; then
+            TAGS="${TAGS}ghcr.io/${GITHUB_REPOSITORY_OWNER}/${{ steps.target.outputs.repo }}:${{ inputs.tag }},"
+          fi
+          if [[ "${{ inputs.registries }}" == *"dockerhub"* ]]; then
+            TAGS="${TAGS}${{ secrets.DOCKERHUB_USERNAME }}/${{ steps.target.outputs.repo }}:${{ inputs.tag }},"
+          fi
+          TAGS="${TAGS%,}"
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+          echo "Tags: ${TAGS}"
+
+      - name: Build image tags (base)
+        id: tags_base
+        shell: bash
+        run: |
+          TAGS=""
+          if [[ "${{ inputs.registries }}" == *"ghcr"* ]]; then
+            TAGS="${TAGS}ghcr.io/${GITHUB_REPOSITORY_OWNER}/${{ steps.target.outputs.repo }}:${{ inputs.tag }}-base,"
+          fi
+          if [[ "${{ inputs.registries }}" == *"dockerhub"* ]]; then
+            TAGS="${TAGS}${{ secrets.DOCKERHUB_USERNAME }}/${{ steps.target.outputs.repo }}:${{ inputs.tag }}-base,"
+          fi
+          TAGS="${TAGS%,}"
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+          echo "Tags (base): ${TAGS}"
+
+      - name: Build and push image
+        if: inputs.env_vars == ''
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ steps.df.outputs.file }}
+          platforms: ${{ inputs.platforms }}
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ inputs.repo_url }}
+
+      - name: Build and push base image
+        if: inputs.env_vars != ''
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ steps.df.outputs.file }}
+          platforms: ${{ inputs.platforms }}
+          push: true
+          tags: ${{ steps.tags_base.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ inputs.repo_url }}
+
+      - name: Generate env overlay Dockerfile
+        if: inputs.env_vars != ''
+        shell: bash
+        run: |
+          BASE="ghcr.io/${GITHUB_REPOSITORY_OWNER}/${{ steps.target.outputs.repo }}:${{ inputs.tag }}-base"
+          if [[ "${{ inputs.registries }}" == *"dockerhub"* ]]; then
+            BASE="${{ secrets.DOCKERHUB_USERNAME }}/${{ steps.target.outputs.repo }}:${{ inputs.tag }}-base"
+          fi
+          cat > Dockerfile.baked <<EOF
+          ARG BASE_IMAGE=${BASE}
+          FROM \${BASE_IMAGE}
+          EOF
+          echo "${{ inputs.env_vars }}" | base64 -d 2>/dev/null | while IFS= read -r line; do
+            [ -n "$line" ] && echo "ENV $line" >> Dockerfile.baked
+          done
+          echo "--- Dockerfile.baked ---"
+          cat Dockerfile.baked
+
+      - name: Build and push final image
+        if: inputs.env_vars != ''
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.baked
+          platforms: ${{ inputs.platforms }}
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ inputs.repo_url }}

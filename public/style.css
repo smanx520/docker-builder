@@ -1,0 +1,280 @@
+:root {
+  color-scheme: dark;
+  --bg: #0d1117;
+  --surface: #161b22;
+  --surface-2: #1f2630;
+  --border: #30363d;
+  --text: #e6edf3;
+  --text-muted: #8b949e;
+  --brand: #4b6bfb;
+  --brand-strong: #3a55e0;
+  --success: #3fb950;
+  --danger: #f85149;
+  --warning: #d29922;
+  --radius: 8px;
+  --radius-card: 12px;
+  --font: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+/* 强制 hidden 属性始终生效（防止 .row/.auth-panel 等 display 规则覆盖） */
+[hidden] { display: none !important; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 400 14px/1.6 var(--font);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 顶部 */
+.topbar {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.topbar-inner {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.brand { display: flex; align-items: center; gap: 10px; }
+.logo { color: var(--brand); font-size: 20px; }
+.brand-name { font-weight: 600; font-size: 16px; }
+.brand-sub { color: var(--text-muted); font-size: 13px; }
+
+/* 语言切换 */
+.lang-switch { display: flex; gap: 4px; }
+.lang-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all .12s ease;
+}
+.lang-btn:hover { color: var(--text); }
+.lang-btn.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+.chip {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* 主体 */
+.container {
+  flex: 1;
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 32px 20px 48px;
+}
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 28px;
+}
+.title { margin: 0 0 6px; font-size: 22px; }
+.desc { margin: 0 0 24px; color: var(--text-muted); }
+
+/* 步骤指示器 */
+.stepper {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 26px;
+}
+.sstep {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 13px;
+  user-select: none;
+}
+.sstep .snum {
+  width: 20px; height: 20px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: var(--border);
+  color: var(--text-muted);
+  font-size: 12px; font-weight: 600;
+}
+.sstep.active { border-color: var(--brand); color: var(--text); }
+.sstep.active .snum { background: var(--brand); color: #fff; }
+.sstep.done { border-color: var(--success); color: var(--text); }
+.sstep.done .snum { background: var(--success); color: #fff; }
+
+/* 步骤 */
+.step { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--border); }
+.step:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
+.step-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.step-no {
+  width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--brand); color: #fff;
+  border-radius: 50%; font-weight: 600; font-size: 14px;
+}
+.step-head h2 { margin: 0; font-size: 17px; }
+
+/* 表单 */
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field > span { color: var(--text-muted); font-size: 13px; }
+.field:has(textarea) { grid-column: 1 / -1; }
+
+input[type="text"], input[type="password"], textarea, select {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 9px 12px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color .12s ease;
+}
+input:focus, textarea:focus, select:focus { border-color: var(--brand); }
+textarea { resize: vertical; font-family: var(--mono); font-size: 13px; }
+
+/* 按钮 */
+.btn {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 8px 18px;
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter .12s ease, border-color .12s ease;
+}
+.btn:hover { filter: brightness(1.1); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-primary { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 500; }
+.btn-primary:hover { background: var(--brand-strong); filter: none; }
+.btn-ghost { background: transparent; }
+.btn-lg { padding: 10px 26px; font-size: 15px; }
+
+/* 架构 chips */
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.chips .chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 12px; cursor: pointer; user-select: none;
+  color: var(--text);
+}
+.chips input { accent-color: var(--brand); }
+
+/* 推送平台（registry）与 Docker Hub 字段 */
+.registry-field { grid-column: 1 / -1; }
+.registry-field .hint { margin-top: 8px; }
+.sub-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  grid-column: 1 / -1;
+}
+
+/* 登录（第 3 步内） */
+.login-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.login-box .row { margin: 0; }
+
+/* 认证方式：登录 / Token 二选一 */
+.auth-choice { display: flex; gap: 8px; flex-wrap: wrap; }
+.auth-opt { cursor: pointer; user-select: none; color: var(--text); }
+.auth-opt input { accent-color: var(--brand); }
+.auth-panel { display: flex; flex-direction: column; gap: 10px; }
+.auth-panel .hint { margin: 0; }
+.hint { margin: 10px 0 0; color: var(--text-muted); font-size: 12px; }
+
+/* 检测 Token 说明框 */
+.note-box {
+  margin-top: 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  background: var(--bg);
+}
+.note-box .hint { margin: 0 0 10px; }
+
+/* fork 状态 */
+.fork-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.fork-status { flex: 1; min-width: 200px; color: var(--text-muted); font-size: 13px; }
+.fork-status.ok { color: var(--success); }
+.fork-status.err { color: var(--danger); }
+.fork-box a { text-decoration: none; }
+
+/* 结果 / 进度 */
+.result {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  font-size: 14px;
+  line-height: 1.7;
+}
+.result.ok { border-color: var(--success); }
+.result.err { border-color: var(--danger); }
+.result .k { color: var(--text-muted); }
+.result code {
+  font-family: var(--mono); font-size: 13px;
+  background: var(--surface-2); padding: 1px 6px; border-radius: 4px;
+}
+
+.progress { margin-top: 4px; }
+.pstep { display: flex; align-items: center; gap: 10px; padding: 6px 0; color: var(--text-muted); }
+.pstep .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--border); flex: none; }
+.pstep.active .dot { background: var(--warning); }
+.pstep.done .dot { background: var(--success); }
+.pstep.fail .dot { background: var(--danger); }
+.pstep.active { color: var(--text); }
+.pstep a { color: var(--brand); }
+
+/* 底部 */
+.foot {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 18px;
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 640px) {
+  .grid { grid-template-columns: 1fr; }
+  .brand-sub { display: none; }
+}

@@ -1,0 +1,5 @@
+# 复制为 .dev.vars 后填入本地开发用 OAuth 配置（.dev.vars 已被 gitignore）
+GH_OAUTH_CLIENT_ID=your_github_oauth_client_id
+GH_OAUTH_CLIENT_SECRET=your_github_oauth_client_secret
+# 可选：显式指定回调地址，缺省自动使用当前部署域名的 /api/auth/callback
+# GH_OAUTH_CALLBACK_URL=https://docker-builder.yourdomain.workers.dev/api/auth/callback

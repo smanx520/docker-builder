@@ -1,0 +1,19 @@
+name = "docker-builder"
+main = "src/index.js"
+compatibility_flags = ["nodejs_compat"]
+compatibility_date = "2025-01-24"
+
+# 静态资源（前端页面）由 Worker 托管，API 走 /api/*
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+# 构建宿主项目：用户需 fork 该项目，构建在其自己的 fork 上运行（fork 同名仓库）。
+# 打包前会校验用户是否已 fork 且 fork 已开启 GitHub Actions。
+[vars]
+BUILDER_SOURCE = "smanx/docker-builder"
+
+# 部署时用 wrangler secret 注入：
+#   wrangler secret put GH_OAUTH_CLIENT_ID
+#   wrangler secret put GH_OAUTH_CLIENT_SECRET
+# 本地开发可写入 .dev.vars（已被 .gitignore 忽略）
