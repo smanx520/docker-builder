@@ -425,6 +425,7 @@
       document.getElementById(STEP_SECTIONS[k]).hidden = (Number(k) !== n);
     }
     setStep(n);
+    persistState(); // 切换步骤时显式保存当前进度（不再依赖 beforeunload）
   }
 
   // ---------- 会话持久化：页面刷新 / OAuth 跳转后恢复表单、步骤与构建状态 ----------
@@ -451,11 +452,12 @@
     };
     try { localStorage.setItem(SESSION_KEY, JSON.stringify(snap)); } catch { /* 忽略写入失败 */ }
   }
-  // 表单变更（select / checkbox / blur）即持久化；配合 beforeunload 保证刷新时恢复最新输入
+  // 表单变更（select / checkbox / blur）即持久化——这就是「一步步保存」；
+  // 不再监听 beforeunload：避免刷新 / 关闭页面时把内存状态写回 localStorage，导致清空数据后数据又复活。
+  // 其余保存点见 goToStep()、detect() 成功处、构建触发与轮询更新处的显式 persistState() 调用。
   document.addEventListener('change', (e) => {
     if (e.target && e.target.closest && e.target.closest('.step')) persistState();
   });
-  window.addEventListener('beforeunload', persistState);
 
   // 刷新 / OAuth 回跳后恢复：只回填表单 / 下拉框 / 步骤，不触发检测、不触发「下一步」、不触发 fork 检查等动作
   function restoreState() {
@@ -740,6 +742,7 @@
         `<span class="k">${t('branchesK')}:</span> ${branchList.length} · <span class="k">${t('tagsK')}:</span> ${tagList.length} · ${dfText}`,
         dockerfile ? 'ok' : '');
       checkRefDockerfile(); // 校验当前所选分支 / Tag 的 Dockerfile
+      persistState(); // 检测成功后立即保存仓库 / 分支 / Tag 数据，刷新可直接回填
     } catch (e) {
       els.versionPanel.hidden = true;
       setNextEnabled(false); // 检测失败：「下一步」置灰
