@@ -12,12 +12,13 @@ import {
 import { sealSecret } from '../crypto.js';
 
 // POST /api/build
-// body: { repoUrl, ref?, tag, platforms, registries, envVars, dockerHubUsername, dockerHubToken, gitToken? }
+// body: { repoUrl, ref?, tag, platforms, registries, visibility, envVars, dockerHubUsername, dockerHubToken, gitToken? }
 //
 // 构建宿主仓库 = 登录用户自己的 fork（默认 fork 自 smanx/docker-builder，仓库同名 docker-builder）。
 // 打包前校验：1) 已 fork 宿主项目；2) fork 已开启 GitHub Actions。二者任一不满足则拒绝并给出引导。
 // 目标仓库（repoUrl）只是被克隆构建的对象，无需写权限：公共仓库匿名克隆，私有仓库用 GH_PAT 克隆。
 // 推送平台（registries）：ghcr / dockerhub，默认仅 ghcr；只有勾选 dockerhub 时才需要 Docker Hub 凭据。
+// 镜像可见性（visibility）：public / private，默认 public，随 workflow 下发给 GHCR 设置。
 export async function build(request, env) {
   const token = getToken(request);
   if (!token) return json({ error: '未登录：缺少 GitHub Token' }, 401);
@@ -40,6 +41,8 @@ export async function build(request, env) {
   const gitToken = String(body.gitToken || '').trim();
   // 构建的引用：分支名或 Tag（空 = 默认分支最新代码）
   const ref = String(body.ref || '').trim();
+  // 镜像可见性：仅接受 public / private，默认 public（仅 GHCR 自动生效）
+  const visibility = body.visibility === 'private' ? 'private' : 'public';
 
   if (!tag) throw new Error('Tag 不能为空');
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(tag)) throw new Error('Tag 格式不合法');
@@ -126,6 +129,7 @@ export async function build(request, env) {
     tag,
     platforms,
     registries: registries.join(','),
+    visibility,
     env_vars: envVars.length ? envB64 : ''
   });
 

@@ -60,6 +60,10 @@
       envVarsLabel: '内置环境变量（每行 KEY=VALUE）',
       registryLabel: '推送平台',
       registryHint: 'GHCR（GitHub Container Registry）无需额外账号，镜像推送到 ghcr.io；勾选 Docker Hub 时需填写下方用户名与 Access Token。',
+      visibilityLabel: '镜像可见性',
+      visibilityPublic: '公开',
+      visibilityPrivate: '私有',
+      visibilityHint: 'GHCR 镜像会在推送后自动设置可见性；Docker Hub 的可见性由其仓库默认设置决定，需在 Docker Hub 网页端手动调整。',
       dockerUserLabel: 'Docker Hub 用户名',
       dockerTokenLabel: 'Docker Hub Access Token',
       dockerUserPh: 'your_dockerhub_username',
@@ -144,6 +148,10 @@
       envVarsLabel: 'Built-in env vars (one KEY=VALUE per line)',
       registryLabel: 'Registry',
       registryHint: 'GHCR (GitHub Container Registry) needs no extra account; images push to ghcr.io. When Docker Hub is checked, fill in the username and Access Token below.',
+      visibilityLabel: 'Image visibility',
+      visibilityPublic: 'Public',
+      visibilityPrivate: 'Private',
+      visibilityHint: 'GHCR image visibility is set automatically after the push; Docker Hub visibility follows its repository default settings and must be adjusted manually on Docker Hub.',
       dockerUserLabel: 'Docker Hub username',
       dockerTokenLabel: 'Docker Hub Access Token',
       dockerUserPh: 'your_dockerhub_username',
@@ -347,6 +355,7 @@
   async function checkFork() {
     if (!state.token) return resetFork();
     els.btnForkCheck.disabled = true;
+    els.btnForkCheck.classList.add('is-loading'); // fork 状态检测中：按钮显示 loading
     setForkStatus(t('forkChecking'), '');
     try {
       const s = await api('/api/fork-status');
@@ -371,6 +380,7 @@
       setForkStatus(t('forkCheckFailed', { msg: e.message }), 'err');
     } finally {
       els.btnForkCheck.disabled = false;
+      els.btnForkCheck.classList.remove('is-loading');
     }
   }
 
@@ -403,7 +413,13 @@
       dhubUser: els.inpDhubUser.value.trim(),
       dhubToken: els.inpDhubToken.value.trim(),
       registries: getRegistries(),
+      visibility: getVisibility(),
       platforms: [...els.platforms.querySelectorAll('input:checked')].map((i) => i.value),
+      // 保存分支 / Tag 列表与仓库元信息：刷新后纯回填下拉框，无需重新请求 GitHub。
+      // 兼容两种形态：detect 写入的对象（{name}）与会话恢复写入的字符串，并剔除脏数据（null/undefined）
+      branches: state.repo ? (state.repo.branches || []).map((b) => (b && b.name !== undefined ? b.name : b)).filter((n) => typeof n === 'string') : [],
+      tags: state.repo ? (state.repo.tags || []).map((t) => (t && t.name !== undefined ? t.name : t)).filter((n) => typeof n === 'string') : [],
+      repoMeta: state.repo ? { owner: state.repo.owner, repo: state.repo.repo, fullName: state.repo.fullName, private: state.repo.private, branch: state.repo.branch } : null,
       step: currentStep,
       build: state.build
     };
@@ -415,8 +431,8 @@
   });
   window.addEventListener('beforeunload', persistState);
 
-  // 刷新 / OAuth 回跳后恢复：表单 → 重新检测（填充分支 / Tag）→ 步骤 → 进行中的构建
-  async function restoreState() {
+  // 刷新 / OAuth 回跳后恢复：只回填表单 / 下拉框 / 步骤，不触发检测、不触发「下一步」、不触发 fork 检查等动作
+  function restoreState() {
     let s;
     try { s = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); } catch { s = null; }
     if (!s || !s.repo) return;
@@ -429,16 +445,47 @@
     els.inpDhubToken.value = s.dhubToken || '';
     els.platforms.querySelectorAll('input').forEach((i) => { i.checked = (s.platforms || []).includes(i.value); });
     els.registries.querySelectorAll('input').forEach((i) => { i.checked = (s.registries || ['ghcr']).includes(i.value); });
+    document.querySelectorAll('input[name="visibility"]').forEach((i) => { i.checked = (i.value === (s.visibility || 'public')); });
     renderRegistry();
 
     const step = s.step || 1;
-    try {
-      await detect(true); // 重新检测并填充分支 / Tag 列表
-      if (s.ref) els.selRef.value = s.ref;
-      if (s.branch && [...els.selBranch.options].some((o) => o.value === s.branch)) els.selBranch.value = s.branch;
-      els.versionPanel.hidden = (step !== 1); // 回到第 1 步时展示检测结果 / 版本选择
-      checkRefDockerfile(); // 恢复所选版本后即时校验 Dockerfile
-    } catch { /* 检测失败则保留已填内容，用户可手动重新检测 */ }
+
+    // 用会话中保存的分支 / Tag 列表纯回填下拉框（不发请求、不触发检测）。
+    // 兼容旧会话里的对象 / 字符串 / 脏数据（null/undefined），统一清洗为字符串数组
+    const branches = (Array.isArray(s.branches) ? s.branches : []).map((b) => (b && b.name !== undefined ? b.name : b)).filter((n) => typeof n === 'string');
+    const tags = (Array.isArray(s.tags) ? s.tags : []).map((t) => (t && t.name !== undefined ? t.name : t)).filter((n) => typeof n === 'string');
+    els.selBranch.innerHTML = '';
+    branches.forEach((b) => {
+      const opt = document.createElement('option');
+      opt.value = b;
+      opt.textContent = b;
+      els.selBranch.appendChild(opt);
+    });
+    if (s.branch && branches.includes(s.branch)) els.selBranch.value = s.branch;
+    els.selRef.innerHTML = `<option value="">${t('latestCode')}</option>`;
+    tags.forEach((tg) => {
+      const opt = document.createElement('option');
+      opt.value = tg;
+      opt.textContent = tg;
+      els.selRef.appendChild(opt);
+    });
+    if (s.ref && tags.includes(s.ref)) els.selRef.value = s.ref;
+
+    // 恢复仓库元信息（构建与后续手动检测依赖），仅数据回填，不发起请求
+    if (s.repoMeta) {
+      state.repo = {
+        owner: s.repoMeta.owner,
+        repo: s.repoMeta.repo,
+        fullName: s.repoMeta.fullName,
+        private: s.repoMeta.private,
+        branch: s.repoMeta.branch,
+        branches,
+        tags
+      };
+    }
+
+    // 版本选择区域：回到第 1 步且有分支 / Tag 数据时才展示（仅展示，不触发 Dockerfile 检测）
+    els.versionPanel.hidden = (step !== 1) || (branches.length === 0 && tags.length === 0);
 
     if (s.build) {
       state.build = { images: s.build.images || [], tag: s.build.tag, owner: s.build.owner, repo: s.build.repo, runId: s.build.runId || null };
@@ -463,20 +510,38 @@
     }
 
     goToStep(step >= 2 ? 2 : 1);
-    if (step === 2) {
-      if (state.token) checkFork();
-      else resetFork();
+    if (step === 1) {
+      // 回填后不自动触发 Dockerfile 检测：先把「下一步」置灰，待用户切换分支 / Tag 重新校验后再放开
+      setNextEnabled(false);
+    } else if (step === 2) {
+      // 只回填打包配置数据，不自动触发 fork 检查：配置区保持隐藏，fork 状态显示为待检查，待用户点「检查」通过后再显示
+      resetFork();
     }
   }
 
   // ---------- 步骤导航 ----------
   // 第 1 步内检测成功后点「下一步」进入打包配置（第 2 步）
+  function setNextEnabled(enabled) {
+    els.btnNext.disabled = !enabled;
+  }
+  // Dockerfile 检测中：按钮进入加载态并禁止点击；结束时由 setNextEnabled 决定最终可用状态
+  function setNextLoading(loading) {
+    els.btnNext.classList.toggle('is-loading', loading);
+    if (loading) els.btnNext.disabled = true;
+  }
   els.btnNext.addEventListener('click', () => {
+    // 进入打包配置前，把第一步当前所选 Tag 同步到「镜像 Tag」，确保一定带过去
+    const v = els.selRef.value;
+    if (v) els.inpTag.value = v;
     goToStep(2);
     if (state.token) checkFork();
   });
   // 打包配置「上一步」返回第 1 步（仓库检测与版本）
-  els.btnBackConfig.addEventListener('click', () => goToStep(1));
+  els.btnBackConfig.addEventListener('click', () => {
+    goToStep(1);
+    // 已检测到仓库时，重新展示版本选择区域（含分支 / Tag），避免返回后看不到 tag
+    if (state.repo) els.versionPanel.hidden = false;
+  });
   // 构建进度「上一步」返回打包配置（仅在构建停止后显示）；返回时清除构建状态以停止轮询
   function setBackProgress(visible) {
     els.btnBackProgress.hidden = !visible;
@@ -518,24 +583,33 @@
   els.selBranch.addEventListener('change', checkRefDockerfile);
 
   // 校验所选分支 / Tag 是否包含 Dockerfile（构建按所选版本检出，默认分支有 ≠ 该版本有）
+  let refCheckSeq = 0; // 并发校验序号：只让最新一次检测更新按钮状态
   async function checkRefDockerfile() {
     const hint = $('sel-ref-hint');
-    if (!state.repo) { hint.hidden = true; return; }
+    if (!state.repo) { hint.hidden = true; setNextEnabled(false); return; }
     const ref = els.selRef.value || els.selBranch.value || state.repo.branch;
-    if (!ref) { hint.hidden = true; return; }
+    if (!ref) { hint.hidden = true; setNextEnabled(false); return; }
     const token = els.inpDetectToken.value.trim() || state.token || '';
+    const seq = ++refCheckSeq;
+    setNextLoading(true); // 检测中：按钮显示 loading 并不可点击
     try {
       const rootItems = await ghApi(token, `/repos/${state.repo.owner}/${state.repo.repo}/contents?ref=${encodeURIComponent(ref)}`);
+      if (seq !== refCheckSeq) return; // 已被更新的检测覆盖，丢弃本次结果
       const files = Array.isArray(rootItems) ? rootItems : [];
       const rootFile = files.find((i) => i.type === 'file' && /^Dockerfile/.test(i.name));
       const df = rootFile ? rootFile.path : null;
+      setNextEnabled(!!df); // 未检测到 Dockerfile 时「下一步」置灰
       hint.hidden = false;
       hint.className = 'hint' + (df ? ' ok' : ' warn');
       hint.innerHTML = df
         ? `<span class="k">${t('dockerfileK')}:</span> <code>${df}</code>（${ref}）`
         : t('noDockerfileInRef', { ref });
     } catch {
-      hint.hidden = true; // 检测失败不阻塞，构建时仍会再次校验
+      if (seq !== refCheckSeq) return;
+      hint.hidden = true;
+      setNextEnabled(false); // 校验失败视为未检测到 Dockerfile，「下一步」保持置灰
+    } finally {
+      if (seq === refCheckSeq) setNextLoading(false); // 结束加载态，最终可用状态已由 setNextEnabled 设置
     }
   }
 
@@ -573,6 +647,7 @@
     if (!repoUrl) return alert(t('needRepo'));
     setBtn(els.btnDetect, true, t('detecting'));
     els.versionPanel.hidden = true;
+    setNextEnabled(false); // 重新检测期间禁用「下一步」
     show(els.detectResult, t('detecting'), '');
     try {
       const { owner, repo } = parseRepoUrl(repoUrl);
@@ -641,6 +716,7 @@
       checkRefDockerfile(); // 校验当前所选分支 / Tag 的 Dockerfile
     } catch (e) {
       els.versionPanel.hidden = true;
+      setNextEnabled(false); // 检测失败：「下一步」置灰
       show(els.detectResult, `❌ ${e.message}`, 'err');
     } finally {
       setBtn(els.btnDetect, false, t('detect'));
@@ -656,6 +732,12 @@
     els.dhubFields.hidden = !showDhub;
   }
   els.registries.addEventListener('change', renderRegistry);
+
+  // ---------- 镜像可见性（public / private，默认 public） ----------
+  function getVisibility() {
+    const checked = document.querySelector('input[name="visibility"]:checked');
+    return checked ? checked.value : 'public';
+  }
 
   els.btnBuild.addEventListener('click', startBuild);
 
@@ -676,6 +758,7 @@
       tag: els.inpTag.value.trim(),
       platforms,
       registries,
+      visibility: getVisibility(),
       envVars: els.inpEnv.value,
       dockerHubUsername: els.inpDhubUser.value.trim(),
       dockerHubToken: els.inpDhubToken.value.trim(),

@@ -5,6 +5,9 @@
 # 推送平台（inputs.registries，逗号分隔：ghcr,dockerhub）：
 #   - ghcr：使用 GITHUB_TOKEN 推送到 ghcr.io/{GITHUB_REPOSITORY_OWNER}
 #   - dockerhub：凭据来自宿主仓库 secrets：DOCKERHUB_USERNAME / DOCKERHUB_TOKEN（仅勾选时才写入）
+# 镜像可见性（inputs.visibility，public/private，默认 public）：
+#   - 仅 GHCR 可自动设置：推送后调用 GitHub API 修改包可见性
+#   - Docker Hub 无 API 自动设置，可见性由其仓库默认设置决定，需在 Docker Hub 网页端手动调整
 name: docker-build-web
 
 on:
@@ -29,6 +32,10 @@ on:
         description: '推送平台，逗号分隔：ghcr,dockerhub'
         required: false
         default: 'ghcr'
+      visibility:
+        description: '镜像可见性：public 公开 / private 私有（仅 GHCR 自动生效）'
+        required: false
+        default: 'public'
       env_vars:
         description: '内置环境变量（KEY=VALUE 每行一个，base64 编码）'
         required: false
@@ -207,3 +214,21 @@ jobs:
           tags: ${{ steps.tags.outputs.tags }}
           labels: |
             org.opencontainers.image.source=${{ inputs.repo_url }}
+
+      # 推送后设置 GHCR 包可见性（public/private）。包名与镜像同名且统一小写；
+      # 首次推送后包可能存在传播延迟，失败不阻断构建，仅给出告警并提示手动修改。
+      - name: Set GHCR package visibility
+        if: contains(inputs.registries, 'ghcr')
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PACKAGE="${{ steps.target.outputs.repo }}"
+          PACKAGE="${PACKAGE,,}"
+          VIS="${{ inputs.visibility }}"
+          if [ "$VIS" != "private" ]; then VIS="public"; fi
+          echo "Setting GHCR package ${PACKAGE} visibility to ${VIS}"
+          gh api --method PATCH "/user/packages/container/${PACKAGE}" \
+            -f "visibility=${VIS}" || \
+            echo "::warning::Could not set GHCR package ${PACKAGE} visibility to ${VIS}. Set it manually at https://github.com/users/${GITHUB_REPOSITORY_OWNER}/packages/container/${PACKAGE}/settings"
+

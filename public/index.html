@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Docker Builder · GitHub 一键打包</title>
-  <link rel="stylesheet" href="/style.css?v=20260904k" />
+  <link rel="stylesheet" href="/style.css?v=20260904r" />
 </head>
 <body>
   <header class="topbar">
@@ -134,6 +134,14 @@
               </label>
             </div>
             <label class="field">
+              <span data-i18n="visibilityLabel">镜像可见性</span>
+              <div class="chips" id="visibility">
+                <label class="chip"><input type="radio" name="visibility" value="public" checked /> <span data-i18n="visibilityPublic">公开</span></label>
+                <label class="chip"><input type="radio" name="visibility" value="private" /> <span data-i18n="visibilityPrivate">私有</span></label>
+              </div>
+              <p class="hint" data-i18n="visibilityHint">GHCR 镜像会在推送后自动设置可见性；Docker Hub 的可见性由其仓库默认设置决定，需在 Docker Hub 网页端手动调整。</p>
+            </label>
+            <label class="field">
               <span data-i18n="envVarsLabel">内置环境变量（每行 KEY=VALUE）</span>
               <textarea id="inp-env" rows="4" placeholder="NODE_ENV=production&#10;APP_PORT=8080"></textarea>
             </label>
@@ -159,6 +167,6 @@
   </main>
 
   <footer class="foot" data-i18n="footer">Cloudflare Workers · GitHub Actions · Docker Hub</footer>
-  <script src="/app.js?v=20260904k"></script>
+  <script src="/app.js?v=20260904r"></script>
 </body>
 </html>
