@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Docker Builder · GitHub 一键打包</title>
-  <link rel="stylesheet" href="/style.css?v=20260904d" />
+  <link rel="stylesheet" href="/style.css?v=20260904k" />
 </head>
 <body>
   <header class="topbar">
@@ -60,6 +60,7 @@
             </label>
           </div>
           <p class="hint" data-i18n="step2Hint">默认使用所选分支的最新代码；也可在右侧下拉选择某个 Tag 固定版本打包。构建时会自动检测所选版本是否包含 Dockerfile。</p>
+          <p id="sel-ref-hint" class="hint" hidden></p>
           <div class="row">
             <button id="btn-next" class="btn btn-primary" data-i18n="next">下一步</button>
           </div>
@@ -99,47 +100,49 @@
           <button id="btn-fork-check" class="btn btn-ghost" data-i18n="forkCheck">检查</button>
           <a id="fork-link" class="btn btn-ghost" target="_blank" rel="noopener" hidden data-i18n="forkLink">去 fork / 开启 Actions</a>
         </div>
-        <div class="grid">
-          <label class="field">
-            <span data-i18n="imageTagLabel">镜像 Tag</span>
-            <input id="inp-tag" type="text" value="latest" />
-          </label>
-          <label class="field">
-            <span data-i18n="platformsLabel">构建架构</span>
-            <div class="chips" id="platforms">
-              <label class="chip"><input type="checkbox" value="linux/amd64" checked /> amd64</label>
-              <label class="chip"><input type="checkbox" value="linux/arm64" /> arm64</label>
-              <label class="chip"><input type="checkbox" value="linux/arm/v7" /> arm/v7</label>
-              <label class="chip"><input type="checkbox" value="linux/386" /> 386</label>
-            </div>
-          </label>
-          <label class="field registry-field">
-            <span data-i18n="registryLabel">推送平台</span>
-            <div class="chips" id="registries">
-              <label class="chip"><input type="checkbox" value="ghcr" checked /> GHCR</label>
-              <label class="chip"><input type="checkbox" value="dockerhub" /> Docker Hub</label>
-            </div>
-            <p class="hint" data-i18n="registryHint">GHCR（GitHub Container Registry）无需额外账号，镜像推送到 ghcr.io；勾选 Docker Hub 时需填写下方用户名与 Access Token。</p>
-          </label>
-          <div id="dhub-fields" class="sub-grid" hidden>
+        <div id="config-fields" hidden>
+          <div class="grid">
             <label class="field">
-              <span data-i18n="dockerUserLabel">Docker Hub 用户名</span>
-              <input id="inp-dhub-user" type="text" data-i18n-ph="dockerUserPh" placeholder="your_dockerhub_username" />
+              <span data-i18n="imageTagLabel">镜像 Tag</span>
+              <input id="inp-tag" type="text" value="latest" />
             </label>
             <label class="field">
-              <span data-i18n="dockerTokenLabel">Docker Hub Access Token</span>
-              <input id="inp-dhub-token" type="password" data-i18n-ph="dockerTokenPh" placeholder="Read &amp; Write 权限的 Token" />
+              <span data-i18n="platformsLabel">构建架构</span>
+              <div class="chips" id="platforms">
+                <label class="chip"><input type="checkbox" value="linux/amd64" checked /> amd64</label>
+                <label class="chip"><input type="checkbox" value="linux/arm64" /> arm64</label>
+                <label class="chip"><input type="checkbox" value="linux/arm/v7" /> arm/v7</label>
+                <label class="chip"><input type="checkbox" value="linux/386" /> 386</label>
+              </div>
+            </label>
+            <label class="field registry-field">
+              <span data-i18n="registryLabel">推送平台</span>
+              <div class="chips" id="registries">
+                <label class="chip"><input type="checkbox" value="ghcr" checked /> GHCR</label>
+                <label class="chip"><input type="checkbox" value="dockerhub" /> Docker Hub</label>
+              </div>
+              <p class="hint" data-i18n="registryHint">GHCR（GitHub Container Registry）无需额外账号，镜像推送到 ghcr.io；勾选 Docker Hub 时需填写下方用户名与 Access Token。</p>
+            </label>
+            <div id="dhub-fields" class="sub-grid" hidden>
+              <label class="field">
+                <span data-i18n="dockerUserLabel">Docker Hub 用户名</span>
+                <input id="inp-dhub-user" type="text" data-i18n-ph="dockerUserPh" placeholder="your_dockerhub_username" />
+              </label>
+              <label class="field">
+                <span data-i18n="dockerTokenLabel">Docker Hub Access Token</span>
+                <input id="inp-dhub-token" type="password" data-i18n-ph="dockerTokenPh" placeholder="Read &amp; Write 权限的 Token" />
+              </label>
+            </div>
+            <label class="field">
+              <span data-i18n="envVarsLabel">内置环境变量（每行 KEY=VALUE）</span>
+              <textarea id="inp-env" rows="4" placeholder="NODE_ENV=production&#10;APP_PORT=8080"></textarea>
             </label>
           </div>
-          <label class="field">
-            <span data-i18n="envVarsLabel">内置环境变量（每行 KEY=VALUE）</span>
-            <textarea id="inp-env" rows="4" placeholder="NODE_ENV=production&#10;APP_PORT=8080"></textarea>
-          </label>
+          <p class="hint" data-i18n="step3Hint">在「GitHub 登录」与「手动 Token」中二选一完成认证并检查 fork 状态，再填写打包所需信息（推送到 Docker Hub 时才需要其凭据），即可开始打包。</p>
         </div>
-        <p class="hint" data-i18n="step3Hint">在「GitHub 登录」与「手动 Token」中二选一完成认证并检查 fork 状态，再填写打包所需信息（推送到 Docker Hub 时才需要其凭据），即可开始打包。</p>
         <div class="row">
           <button id="btn-back-config" class="btn btn-ghost" data-i18n="back">上一步</button>
-          <button id="btn-build" class="btn btn-primary btn-lg" data-i18n="build">开始打包</button>
+          <button id="btn-build" class="btn btn-primary btn-lg" data-i18n="build" hidden>开始打包</button>
         </div>
       </section>
 
@@ -148,11 +151,14 @@
         <div class="step-head"><span class="step-no">3</span><h2 data-i18n="step3Name">构建进度</h2></div>
         <div id="progress" class="progress"></div>
         <div id="build-result" class="result" hidden></div>
+        <div class="row">
+          <button id="btn-back-progress" class="btn btn-ghost" data-i18n="back" hidden>上一步</button>
+        </div>
       </section>
     </div>
   </main>
 
   <footer class="foot" data-i18n="footer">Cloudflare Workers · GitHub Actions · Docker Hub</footer>
-  <script src="/app.js?v=20260904e"></script>
+  <script src="/app.js?v=20260904k"></script>
 </body>
 </html>

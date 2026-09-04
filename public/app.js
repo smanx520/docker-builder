@@ -31,6 +31,7 @@
       tagsK: 'Tag',
       dockerfileK: 'Dockerfile',
       noDockerfile: '默认分支未找到（构建时会校验所选版本）',
+      noDockerfileInRef: '⚠️ 所选版本 {ref} 在仓库根目录未检测到 Dockerfile，构建会失败，请更换版本或确认 Dockerfile 在根目录',
       branchLabel: '分支（默认选择默认分支）',
       tagLabel: 'Tag / 版本（默认最新代码，可切换）',
       latestCode: '最新代码（默认分支）',
@@ -114,6 +115,7 @@
       tagsK: 'Tag',
       dockerfileK: 'Dockerfile',
       noDockerfile: 'Not found on default branch (re-checked during build)',
+      noDockerfileInRef: '⚠️ No Dockerfile found at repo root for {ref} — the build will fail. Pick another version or make sure the Dockerfile is at the root.',
       branchLabel: 'Branch (default branch selected by default)',
       tagLabel: 'Tag / version (latest code by default, switchable)',
       latestCode: 'Latest code (default branch)',
@@ -161,6 +163,11 @@
       building: 'Building',
       cannotLocateRun: 'Could not auto-locate the build run. Check the <a href="{url}" target="_blank" rel="noopener">Actions page</a> for progress.',
       triggerFailed: '❌ Trigger failed: {msg}',
+      retryHint: 'Please confirm you have forked the builder repo and enabled GitHub Actions, then retry below.',
+      retryNotForked: '❌ <b>{source}</b> has not been forked. <a href="{url}" target="_blank" rel="noopener">Fork it</a> and enable Actions, then retry.',
+      retryNoActions: '⚠️ <b>{source}</b> is forked, but GitHub Actions is not enabled. <a href="{url}" target="_blank" rel="noopener">Enable Actions</a> and retry.',
+      confirmRetry: 'Confirm & Retry',
+      retrying: 'Confirming & retrying…',
       buildSuccess: '✅ Build complete!',
       imageAddr: 'Image',
       pullCmd: 'Pull command',
@@ -174,7 +181,8 @@
   };
 
   const LANG_KEY = 'db_lang';
-  const DRAFT_KEY = 'db_draft';
+  // 会话持久化：表单 + 当前步骤 + 构建状态，页面刷新 / OAuth 跳转后恢复
+  const SESSION_KEY = 'db_session';
   let lang = localStorage.getItem(LANG_KEY) || 'zh';
 
   const state = {
@@ -230,9 +238,11 @@
     forkStatus: $('fork-status'),
     btnForkCheck: $('btn-fork-check'),
     forkLink: $('fork-link'),
+    configFields: $('config-fields'),
     btnBuild: $('btn-build'),
     progress: $('progress'),
-    buildResult: $('build-result')
+    buildResult: $('build-result'),
+    btnBackProgress: $('btn-back-progress')
   };
 
   // ---------- 登录态 ----------
@@ -245,7 +255,7 @@
       if (currentStep === 2) checkFork();
     } else {
       localStorage.removeItem('db_gh_token');
-      sessionStorage.removeItem(DRAFT_KEY);
+      localStorage.removeItem(SESSION_KEY);
       state.user = null;
       resetFork();
     }
@@ -281,8 +291,7 @@
       saveToken(token);
       u.searchParams.delete('access_token');
       history.replaceState(null, '', u.pathname + u.search);
-      // OAuth 登录回来：恢复登录前填写的仓库与打包配置
-      restoreDraft();
+      // 登录后的表单 / 步骤 / 构建状态统一在启动流程 restoreState() 中恢复
     }
   })();
 
@@ -303,7 +312,7 @@
 
   // ---------- 事件 ----------
   els.btnLogin.addEventListener('click', () => {
-    saveDraft(); // OAuth 跳转前保存当前进度，登录后恢复
+    persistState(); // OAuth 跳转前保存当前进度，登录后恢复
     location.href = '/api/auth/login';
   });
   els.btnLogout.addEventListener('click', () => {
@@ -324,9 +333,15 @@
     els.forkStatus.className = 'fork-status' + (cls ? ' ' + cls : '');
     els.forkStatus.innerHTML = msg;
   }
+  // 打包配置只在 fork 检测通过后可见；否则隐藏操作相关内容
+  function setConfigVisible(visible) {
+    els.configFields.hidden = !visible;
+    els.btnBuild.hidden = !visible;
+    els.btnBuild.disabled = !visible;
+  }
   function resetFork() {
     els.forkLink.hidden = true;
-    els.btnBuild.disabled = true;
+    setConfigVisible(false);
     setForkStatus(t('forkIdle'), '');
   }
   async function checkFork() {
@@ -338,21 +353,21 @@
       if (!s.forked) {
         els.forkLink.href = s.forkUrl;
         els.forkLink.hidden = false;
-        els.btnBuild.disabled = true;
+        setConfigVisible(false);
         setForkStatus(t('forkNotForked', { source: s.source }), 'err');
       } else if (!s.actionsEnabled) {
         els.forkLink.href = s.actionsUrl;
         els.forkLink.hidden = false;
-        els.btnBuild.disabled = true;
+        setConfigVisible(false);
         setForkStatus(t('forkNoActions', { source: s.source }), 'err');
       } else {
         els.forkLink.hidden = true;
-        els.btnBuild.disabled = false;
+        setConfigVisible(true);
         setForkStatus(t('forkOk', { source: s.source }), 'ok');
       }
     } catch (e) {
       els.forkLink.hidden = true;
-      els.btnBuild.disabled = true;
+      setConfigVisible(false);
       setForkStatus(t('forkCheckFailed', { msg: e.message }), 'err');
     } finally {
       els.btnForkCheck.disabled = false;
@@ -376,9 +391,9 @@
     setStep(n);
   }
 
-  // ---------- 草稿：OAuth 登录回来时恢复检测 / 打包进度 ----------
-  function saveDraft() {
-    const draft = {
+  // ---------- 会话持久化：页面刷新 / OAuth 跳转后恢复表单、步骤与构建状态 ----------
+  function persistState() {
+    const snap = {
       repo: els.inpRepo.value.trim(),
       detectToken: els.inpDetectToken.value.trim(),
       ref: els.selRef.value,
@@ -388,30 +403,70 @@
       dhubUser: els.inpDhubUser.value.trim(),
       dhubToken: els.inpDhubToken.value.trim(),
       registries: getRegistries(),
-      platforms: [...els.platforms.querySelectorAll('input:checked')].map((i) => i.value)
+      platforms: [...els.platforms.querySelectorAll('input:checked')].map((i) => i.value),
+      step: currentStep,
+      build: state.build
     };
-    sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    try { localStorage.setItem(SESSION_KEY, JSON.stringify(snap)); } catch { /* 忽略写入失败 */ }
   }
-  async function restoreDraft() {
-    let d;
-    try { d = JSON.parse(sessionStorage.getItem(DRAFT_KEY) || 'null'); } catch { d = null; }
-    if (!d || !d.repo) return;
-    els.inpRepo.value = d.repo;
-    els.inpDetectToken.value = d.detectToken || '';
-    els.inpTag.value = d.tag || 'latest';
-    els.inpEnv.value = d.env || '';
-    els.inpDhubUser.value = d.dhubUser || '';
-    els.inpDhubToken.value = d.dhubToken || '';
-    els.platforms.querySelectorAll('input').forEach((i) => { i.checked = (d.platforms || []).includes(i.value); });
-    els.registries.querySelectorAll('input').forEach((i) => { i.checked = (d.registries || ['ghcr']).includes(i.value); });
+  // 表单变更（select / checkbox / blur）即持久化；配合 beforeunload 保证刷新时恢复最新输入
+  document.addEventListener('change', (e) => {
+    if (e.target && e.target.closest && e.target.closest('.step')) persistState();
+  });
+  window.addEventListener('beforeunload', persistState);
+
+  // 刷新 / OAuth 回跳后恢复：表单 → 重新检测（填充分支 / Tag）→ 步骤 → 进行中的构建
+  async function restoreState() {
+    let s;
+    try { s = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); } catch { s = null; }
+    if (!s || !s.repo) return;
+
+    els.inpRepo.value = s.repo;
+    els.inpDetectToken.value = s.detectToken || '';
+    els.inpTag.value = s.tag || 'latest';
+    els.inpEnv.value = s.env || '';
+    els.inpDhubUser.value = s.dhubUser || '';
+    els.inpDhubToken.value = s.dhubToken || '';
+    els.platforms.querySelectorAll('input').forEach((i) => { i.checked = (s.platforms || []).includes(i.value); });
+    els.registries.querySelectorAll('input').forEach((i) => { i.checked = (s.registries || ['ghcr']).includes(i.value); });
     renderRegistry();
-    await detect(); // 重新检测并恢复分支 / Tag 列表
-    if (d.ref) els.selRef.value = d.ref;
-    if (d.branch && [...els.selBranch.options].some((o) => o.value === d.branch)) els.selBranch.value = d.branch;
-    sessionStorage.removeItem(DRAFT_KEY);
-    // 登录前停留在打包配置步骤，登录后直接回到该步骤并自动检查 fork
-    goToStep(2);
-    if (state.token) checkFork();
+
+    const step = s.step || 1;
+    try {
+      await detect(true); // 重新检测并填充分支 / Tag 列表
+      if (s.ref) els.selRef.value = s.ref;
+      if (s.branch && [...els.selBranch.options].some((o) => o.value === s.branch)) els.selBranch.value = s.branch;
+      els.versionPanel.hidden = (step !== 1); // 回到第 1 步时展示检测结果 / 版本选择
+      checkRefDockerfile(); // 恢复所选版本后即时校验 Dockerfile
+    } catch { /* 检测失败则保留已填内容，用户可手动重新检测 */ }
+
+    if (s.build) {
+      state.build = { images: s.build.images || [], tag: s.build.tag, owner: s.build.owner, repo: s.build.repo, runId: s.build.runId || null };
+    }
+
+    if (step === 3 && state.build) {
+      // 正在 / 曾经构建：回到构建进度并恢复轮询（若已完成会直接显示成功 / 失败）
+      goToStep(3);
+      renderSteps([
+        { label: t('stepTrigger'), state: 'done' },
+        { label: t('stepBuild'), state: 'active' },
+        { label: t('stepPush'), state: '' }
+      ]);
+      if (state.build.runId) {
+        hide(els.buildResult);
+        poll(state.build.runId, state.build.owner, state.build.repo);
+      } else {
+        show(els.buildResult, t('cannotLocateRun', { url: `https://github.com/${state.build.owner}/${state.build.repo}/actions` }), '');
+        setBackProgress(true);
+      }
+      return;
+    }
+
+    goToStep(step >= 2 ? 2 : 1);
+    if (step === 2) {
+      if (state.token) checkFork();
+      else resetFork();
+    }
   }
 
   // ---------- 步骤导航 ----------
@@ -422,6 +477,17 @@
   });
   // 打包配置「上一步」返回第 1 步（仓库检测与版本）
   els.btnBackConfig.addEventListener('click', () => goToStep(1));
+  // 构建进度「上一步」返回打包配置（仅在构建停止后显示）；返回时清除构建状态以停止轮询
+  function setBackProgress(visible) {
+    els.btnBackProgress.hidden = !visible;
+  }
+  els.btnBackProgress.addEventListener('click', () => {
+    state.build = null; // 清除以停止 poll 轮询
+    persistState();
+    goToStep(2);
+    if (state.token) checkFork();
+    else resetFork();
+  });
 
   // ---------- 语言切换 ----------
   function setLang(l) {
@@ -443,6 +509,35 @@
 
   els.btnDetect.addEventListener('click', () => detect());
   els.inpRepo.addEventListener('keydown', (e) => { if (e.key === 'Enter') detect(); });
+  // 第一步选择 Tag 时，同步第二步的「镜像 Tag」；选择「最新代码」时不改动
+  els.selRef.addEventListener('change', () => {
+    const v = els.selRef.value;
+    if (v) els.inpTag.value = v;
+    checkRefDockerfile();
+  });
+  els.selBranch.addEventListener('change', checkRefDockerfile);
+
+  // 校验所选分支 / Tag 是否包含 Dockerfile（构建按所选版本检出，默认分支有 ≠ 该版本有）
+  async function checkRefDockerfile() {
+    const hint = $('sel-ref-hint');
+    if (!state.repo) { hint.hidden = true; return; }
+    const ref = els.selRef.value || els.selBranch.value || state.repo.branch;
+    if (!ref) { hint.hidden = true; return; }
+    const token = els.inpDetectToken.value.trim() || state.token || '';
+    try {
+      const rootItems = await ghApi(token, `/repos/${state.repo.owner}/${state.repo.repo}/contents?ref=${encodeURIComponent(ref)}`);
+      const files = Array.isArray(rootItems) ? rootItems : [];
+      const rootFile = files.find((i) => i.type === 'file' && /^Dockerfile/.test(i.name));
+      const df = rootFile ? rootFile.path : null;
+      hint.hidden = false;
+      hint.className = 'hint' + (df ? ' ok' : ' warn');
+      hint.innerHTML = df
+        ? `<span class="k">${t('dockerfileK')}:</span> <code>${df}</code>（${ref}）`
+        : t('noDockerfileInRef', { ref });
+    } catch {
+      hint.hidden = true; // 检测失败不阻塞，构建时仍会再次校验
+    }
+  }
 
   // ---------- 仓库检测（浏览器直连 GitHub API，公共仓库无需登录 / Token） ----------
   const GH_API = 'https://api.github.com';
@@ -476,15 +571,22 @@
   async function detect(silent = false) {
     const repoUrl = els.inpRepo.value.trim();
     if (!repoUrl) return alert(t('needRepo'));
-    // 优先用「检测 Token」；未填时自动复用登录账户 Token（可读私有仓库）；两者皆无则匿名（公共仓库）
-    const detectToken = els.inpDetectToken.value.trim() || state.token || '';
     setBtn(els.btnDetect, true, t('detecting'));
     els.versionPanel.hidden = true;
     show(els.detectResult, t('detecting'), '');
     try {
       const { owner, repo } = parseRepoUrl(repoUrl);
-      // 1) 仓库信息：可读取即视为有权限（公共仓库匿名即可，私有仓库需 Token）
-      const info = await ghApi(detectToken, `/repos/${owner}/${repo}`);
+      // 公共仓库匿名即可检测；匿名失败（私有仓库 / 限流）再退回「检测 Token」或登录 Token。
+      // 先匿名可避免本地残留的无效 Token 让公共仓库检测也返回 401。
+      let info;
+      let detectToken = '';
+      try {
+        info = await ghApi('', `/repos/${owner}/${repo}`);
+      } catch {
+        detectToken = els.inpDetectToken.value.trim() || state.token || '';
+        if (!detectToken) throw new Error(t('repo404'));
+        info = await ghApi(detectToken, `/repos/${owner}/${repo}`);
+      }
       const branch = info.default_branch;
       // 2) 分支 + Tag 列表（并行拉取）
       const [branches, tags] = await Promise.all([
@@ -499,13 +601,7 @@
         const rootItems = await ghApi(detectToken, `/repos/${owner}/${repo}/contents?ref=${encodeURIComponent(branch)}`);
         const files = Array.isArray(rootItems) ? rootItems : [];
         const rootFile = files.find((i) => i.type === 'file' && /^Dockerfile/.test(i.name));
-        if (rootFile) {
-          dockerfile = rootFile.path;
-        } else if (files.some((i) => i.type === 'dir' && i.name === 'docker')) {
-          const dockerItems = await ghApi(detectToken, `/repos/${owner}/${repo}/contents/docker?ref=${encodeURIComponent(branch)}`);
-          const f = (Array.isArray(dockerItems) ? dockerItems : []).find((i) => i.type === 'file' && /^Dockerfile/.test(i.name));
-          if (f) dockerfile = f.path;
-        }
+        if (rootFile) dockerfile = rootFile.path;
       } catch {
         dockerfile = null;
       }
@@ -542,6 +638,7 @@
         `<span class="k">${t('defaultBranchK')}:</span> <code>${branch}</code> · ` +
         `<span class="k">${t('branchesK')}:</span> ${branchList.length} · <span class="k">${t('tagsK')}:</span> ${tagList.length} · ${dfText}`,
         dockerfile ? 'ok' : '');
+      checkRefDockerfile(); // 校验当前所选分支 / Tag 的 Dockerfile
     } catch (e) {
       els.versionPanel.hidden = true;
       show(els.detectResult, `❌ ${e.message}`, 'err');
@@ -596,7 +693,9 @@
     try {
       const r = await api('/api/build', { method: 'POST', body });
       // images 为完整镜像地址数组（GHCR / Docker Hub）
-      state.build = { images: r.images || [], tag: r.tag, owner: r.owner, repo: r.repo };
+      state.build = { images: r.images || [], tag: r.tag, owner: r.owner, repo: r.repo, runId: r.runId || null };
+      setBackProgress(false); // 构建进行中不显示「上一步」
+      persistState(); // 记录构建状态，刷新后恢复进度
       renderSteps([
         { label: t('stepTrigger'), state: 'done' },
         { label: t('stepBuild'), state: 'active' },
@@ -611,23 +710,55 @@
           { label: t('stepPush'), state: '' }
         ]);
         show(els.buildResult, t('cannotLocateRun', { url: `https://github.com/${r.owner}/${r.repo}/actions` }), '');
+        setBackProgress(true);
       }
     } catch (e) {
+      state.build = null; // 触发失败：没有可轮询的构建，刷新后回到打包配置
+      persistState();
       renderSteps([
         { label: t('stepTrigger'), state: 'fail' },
         { label: t('stepBuild'), state: '' },
         { label: t('stepPush'), state: '' }
       ]);
-      show(els.buildResult, t('triggerFailed', { msg: e.message }), 'err');
+      renderRetry(t('triggerFailed', { msg: e.message }) + '<br><span class="k">' + t('retryHint') + '</span>', 'err');
     } finally {
       setBtn(els.btnBuild, false, t('build'));
     }
   }
 
+  // 触发失败后：展示失败原因 + 「确认并重试」按钮（重试前先确认 fork 与 Actions 状态）
+  function renderRetry(msgHtml, cls) {
+    show(els.buildResult,
+      msgHtml + '<div class="retry-row"><button type="button" class="btn btn-primary">' + t('confirmRetry') + '</button></div>',
+      cls);
+    els.buildResult.querySelector('.retry-row button').addEventListener('click', retryBuild);
+    setBackProgress(true); // 构建已停止，允许返回打包配置
+  }
+  async function retryBuild() {
+    const btn = els.buildResult.querySelector('.retry-row button');
+    if (btn) { btn.disabled = true; btn.textContent = t('retrying'); }
+    try {
+      const s = await api('/api/fork-status');
+      if (!s.forked) {
+        renderRetry(t('retryNotForked', { source: s.source, url: s.forkUrl }), 'err');
+        return;
+      }
+      if (!s.actionsEnabled) {
+        renderRetry(t('retryNoActions', { source: s.source, url: s.actionsUrl }), 'err');
+        return;
+      }
+      // 已 fork 且 Actions 已开启 → 重新触发构建
+      startBuild();
+    } catch (e) {
+      renderRetry(t('forkCheckFailed', { msg: e.message }), 'err');
+    }
+  }
+
   async function poll(runId, owner, repo) {
     const started = Date.now();
-    const timer = setInterval(async () => {
-      if (!state.build) return clearInterval(timer);
+    let timer = null;
+    const check = async () => {
+      if (!state.build) { if (timer) clearInterval(timer); return; }
       try {
         const s = await api(`/api/status?owner=${owner}&repo=${repo}&run_id=${runId}`);
         if (s.status === 'queued') {
@@ -643,7 +774,7 @@
             { label: t('stepPush'), state: 'active' }
           ]);
         } else if (s.status === 'completed') {
-          clearInterval(timer);
+          if (timer) clearInterval(timer);
           const ok = s.conclusion === 'success';
           renderSteps([
             { label: t('stepTrigger'), state: 'done' },
@@ -666,15 +797,20 @@
               `<a href="${s.htmlUrl}" target="_blank" rel="noopener">${t('viewBuildLog')}</a>`,
               'err');
           }
+          setBackProgress(true); // 构建结束，显示「上一步」
+          persistState();
         }
       } catch (e) {
         // 轮询出错不中断，超时兜底
         if (Date.now() - started > 900000) {
-          clearInterval(timer);
+          if (timer) clearInterval(timer);
           show(els.buildResult, t('pollTimeout', { url: `https://github.com/${owner}/${repo}/actions` }), '');
+          setBackProgress(true);
         }
       }
-    }, 4000);
+    };
+    check(); // 立即查询一次，刷新恢复时马上拿到最新状态
+    timer = setInterval(check, 4000);
   }
 
   // ---------- 渲染辅助 ----------
@@ -706,6 +842,8 @@
   setAuthMode(authMode);
   goToStep(1);
   renderRegistry();
-  if (state.token) fetchUser().catch(() => {});
+  // 登录相关只在「打包配置」步骤触发（saveToken / checkFork），不要在页面加载时自动请求 whoami
   renderAuth();
+  // 恢复上次会话：表单 / 步骤 / 进行中的构建（刷新后依然显示「构建中」或最新结果）
+  restoreState();
 })();

@@ -85,10 +85,6 @@ jobs:
             FILE="Dockerfile"
           elif compgen -G "Dockerfile.*" >/dev/null; then
             FILE="$(ls Dockerfile.* 2>/dev/null | head -n1)"
-          elif [ -f docker/Dockerfile ]; then
-            FILE="docker/Dockerfile"
-          elif compgen -G "docker/Dockerfile.*" >/dev/null; then
-            FILE="$(ls docker/Dockerfile.* 2>/dev/null | head -n1)"
           fi
           echo "file=${FILE}" >> "$GITHUB_OUTPUT"
           echo "Dockerfile: ${FILE}"
@@ -97,7 +93,13 @@ jobs:
         if: steps.df.outputs.file == ''
         shell: bash
         run: |
-          echo "未在仓库根目录或 docker/ 目录找到 Dockerfile（可包含 Dockerfile.* 后缀变体）"
+          echo "未在仓库根目录找到 Dockerfile（可包含 Dockerfile.* 后缀变体）"
+          echo "克隆的仓库: ${{ steps.target.outputs.owner }}/${{ steps.target.outputs.repo }}"
+          echo "构建引用(ref): '${{ inputs.ref }}'"
+          echo "当前检出提交:"
+          git log -1 --oneline 2>/dev/null || true
+          echo "仓库根目录文件列表:"
+          ls -la
           exit 1
 
       - name: Set up QEMU
