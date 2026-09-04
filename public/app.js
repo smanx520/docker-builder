@@ -218,6 +218,9 @@
   // 当前步骤（1 仓库检测与版本 / 2 打包配置 / 3 构建进度）。
   // 声明在文件顶部：initFromUrl 会在文件后面部分声明该变量之前就调用 saveToken，必须提前初始化。
   let currentStep = 1;
+  // 启动恢复会话期间置为 true：goToStep 内不写回 localStorage，避免 restoreState 读取之前
+  // 用空表单覆盖已保存的步骤与数据（否则刷新后数据会全部丢失）。
+  let restoring = false;
 
   function t(key, vars) {
     let s = (I18N[lang] && I18N[lang][key]) || I18N.zh[key] || key;
@@ -425,7 +428,7 @@
       document.getElementById(STEP_SECTIONS[k]).hidden = (Number(k) !== n);
     }
     setStep(n);
-    persistState(); // 切换步骤时显式保存当前进度（不再依赖 beforeunload）
+    if (!restoring) persistState(); // 切换步骤时显式保存当前进度（不再依赖 beforeunload）
   }
 
   // ---------- 会话持久化：页面刷新 / OAuth 跳转后恢复表单、步骤与构建状态 ----------
@@ -952,10 +955,14 @@
   renderStatic();
   document.querySelectorAll('.lang-btn').forEach((b) => b.classList.toggle('on', b.dataset.lang === lang));
   setAuthMode(authMode);
-  goToStep(1);
+  // 恢复会话期间禁止 goToStep 写回：先让 restoreState 读取已保存的步骤 / 数据，再展示对应步骤，
+  // 否则 goToStep(1) 会用空表单覆盖已保存的会话，导致刷新后数据全部丢失。
+  restoring = true;
+  goToStep(1); // 初始化 DOM：默认展示第 1 步（不写回）
   renderRegistry();
   // 登录相关只在「打包配置」步骤触发（saveToken / checkFork），不要在页面加载时自动请求 whoami
   renderAuth();
   // 恢复上次会话：表单 / 步骤 / 进行中的构建（刷新后依然显示「构建中」或最新结果）
   restoreState();
+  restoring = false; // 恢复完成，重新启用显式持久化
 })();
