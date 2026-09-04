@@ -1,1 +1,0 @@
-This folder contains the built output assets for the worker "docker-builder" generated at 2026-09-04T02:11:37.249Z.
